@@ -1,0 +1,38 @@
+{
+    "extends": "../base.tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "rootDir": "../../",
+        "target": "es2019",
+        "ignoreDeprecations": "6.0",
+        "strict": false,
+        "types": [
+            "../../../temp/declarations/cc",
+            "../../../temp/declarations/jsb",
+            "../../../temp/declarations/cc.env",
+            "../../../temp/declarations/cc.custom-macro"
+        ],
+        "paths": {
+            "db://internal/*": [
+                "../../../pTS_cc_engine_3x/editor/assets/*"
+            ],
+            "db://assets/*": [
+                "../../../assets/*"
+            ],
+            "db://pts-core/*": [
+                "../../pts-core/assets/*"
+            ],
+            "db://pts-spine/*": [
+                "./*"
+            ]
+        }
+    },
+    "include": [
+        "**/*",
+        ".dev/**/*",
+        "../../pts-core/**/*.d.ts",
+        "../../pts-core/assets/**/*.ts",
+        "../../pts-core/assets/.dev/**/*.d.ts",
+        "../../../assets/.dev/**/*.d.ts"
+    ]
+}

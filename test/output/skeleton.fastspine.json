@@ -1,0 +1,24 @@
+{
+  "fps": 30,
+  "totalFrames": 31,
+  "vertexCountPerFrame": 4,
+  "indexCount": 6,
+  "animations": [
+    {
+      "name": "animation",
+      "startFrame": 0,
+      "frameCount": 31,
+      "duration": 1,
+      "fps": 30,
+      "loop": true
+    }
+  ],
+  "events": [],
+  "skins": [
+    "s1",
+    "s2"
+  ],
+  "binarySize": 2549,
+  "bonesCount": 2,
+  "slotsCount": 1
+}

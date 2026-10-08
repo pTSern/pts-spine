@@ -1,0 +1,31 @@
+{
+  "fps": 30,
+  "totalFrames": 245,
+  "vertexCountPerFrame": 403,
+  "indexCount": 1305,
+  "animations": [
+    {
+      "name": "LoseUI",
+      "startFrame": 0,
+      "frameCount": 121,
+      "duration": 4,
+      "fps": 30,
+      "loop": true
+    },
+    {
+      "name": "WinUI",
+      "startFrame": 121,
+      "frameCount": 124,
+      "duration": 4.1,
+      "fps": 30,
+      "loop": true
+    }
+  ],
+  "events": [],
+  "skins": [
+    "default"
+  ],
+  "binarySize": 1977381,
+  "bonesCount": 66,
+  "slotsCount": 26
+}

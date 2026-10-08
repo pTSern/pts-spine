@@ -1,0 +1,54 @@
+{
+  "package_version": 2,
+  "version": "1.0.0",
+  "name": "pts-spine",
+  "description": "Fast Spine Converter & High-Performance Multi-Drawcall Batching Engine for Cocos Creator",
+  "author": "pTSern",
+  "main": "./main.js",
+  "editor": ">=3.8.0",
+  "panels": {
+    "default": {
+      "title": "Fast Spine Optimizer",
+      "type": "dockable",
+      "main": "./panel/index.js",
+      "size": {
+        "min-width": 500,
+        "min-height": 450,
+        "width": 640,
+        "height": 720
+      }
+    }
+  },
+  "contributions": {
+    "menu": [
+      {
+        "path": "i18n:menu.extension",
+        "label": "pTSpine (Fast Spine Optimizer)",
+        "message": "open-panel"
+      }
+    ],
+    "messages": {
+      "open-panel": {
+        "methods": [
+          "openPanel"
+        ]
+      },
+      "bake-spine": {
+        "methods": [
+          "bakeSpine"
+        ]
+      },
+      "scan-spines": {
+        "methods": [
+          "scanSpines"
+        ]
+      }
+    },
+    "asset-db": {
+      "mount": {
+        "path": "./assets",
+        "readonly": true
+      }
+    }
+  }
+}
