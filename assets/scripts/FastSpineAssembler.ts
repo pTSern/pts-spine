@@ -42,8 +42,10 @@ export class FastSpineAssembler implements IAssembler {
         this._updateVertices(comp, rd, chunk);
 
         // Bind texture and material to RenderData draw info
-        if (!rd.material) {
-            rd.material = comp.getRenderMaterial(0)!;
+        const curMat = comp.getRenderMaterial(0);
+        if (curMat && rd.material !== curMat) {
+            rd.material = curMat;
+            rd.passDirty = true;
         }
         if (comp.texture) {
             rd.updateRenderData(comp, comp.texture);

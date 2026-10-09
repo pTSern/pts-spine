@@ -1,8 +1,9 @@
-import { _decorator, UIRenderer, BufferAsset, Texture2D, JsonAsset, Material, EventTarget, assetManager, UITransform } from 'cc';
+import { _decorator, UIRenderer, BufferAsset, Texture2D, JsonAsset, Material, EventTarget, assetManager, UITransform, CCClass } from 'cc';
 import { EDITOR } from 'cc/env';
 import { FastSpineData, FastSpineAnimation, FastSpineEvent } from './FastSpineData';
 import { fastSpineAssembler } from './FastSpineAssembler';
 import { FastSpineBatchManager } from './FastSpineBatchManager';
+import { CC_EnumList, CC_IEnumList } from 'db://pts-core/scripts/interfaces/cc/CC.IEnumable';
 
 const { ccclass, property, executeInEditMode, menu, playOnFocus } = _decorator;
 
@@ -58,6 +59,8 @@ export class FastSpine extends UIRenderer {
     public set fastSpineData(val: BufferAsset | null) {
         this._fastSpineData = val;
         this._initData();
+        this.onFocusInEditor();
+
     }
 
     @property({ type: Texture2D, tooltip: 'Atlas texture page' })
@@ -72,9 +75,6 @@ export class FastSpine extends UIRenderer {
         (this as any).updateMaterial?.();
         FastSpineBatchManager.instance.updateRegistration(this);
     }
-
-    @property({ type: JsonAsset, tooltip: 'Optional companion JSON metadata' })
-    public fastSpineJson: JsonAsset | null = null;
 
     @property({ tooltip: 'Default animation name' })
     public defaultAnimation = '';
@@ -115,11 +115,75 @@ export class FastSpine extends UIRenderer {
         }
     }
 
+    onFocusInEditor(): void {
+        if(!this._data) {
+            CCClass.Attr.setClassAttr(this, 'defaultAnimation', 'type', "CCString");
+            return;
+        }
+
+        const _data = this._data.getAnimationNames();
+        const _list = CC_IEnumList.generator(_data)
+        CCClass.Attr.setClassAttr(this, 'defaultAnimation', 'type', "Enum");
+        CCClass.Attr.setClassAttr(this, 'defaultAnimation', 'enumList', _list);
+    }
+
+    private static _sharedPmaMaterial: Material | null = null;
+
+    /**
+     * Get or create a globally shared material configured for premultiplied alpha (ONE, ONE_MINUS_SRC_ALPHA).
+     * Sharing a single Material asset across all FastSpine instances is essential for Cocos Creator's
+     * Batcher2D to batch multiple instances into the same draw call instead of breaking batch per node.
+     */
+    public static getSharedPmaMaterial(baseMat: Material): Material {
+        if (!FastSpine._sharedPmaMaterial || !FastSpine._sharedPmaMaterial.isValid) {
+            const pmaMat = new Material();
+            pmaMat.copy(baseMat, {
+                states: {
+                    blendState: {
+                        targets: [{
+                            blend: true,
+                            blendSrc: BlendFactor.ONE,
+                            blendDst: BlendFactor.ONE_MINUS_SRC_ALPHA,
+                            blendSrcAlpha: BlendFactor.ONE,
+                            blendDstAlpha: BlendFactor.ONE_MINUS_SRC_ALPHA,
+                        }],
+                    },
+                },
+            });
+            FastSpine._sharedPmaMaterial = pmaMat;
+        }
+        return FastSpine._sharedPmaMaterial;
+    }
+
+    protected _updateBuiltinMaterial(): Material {
+        const baseMat = super._updateBuiltinMaterial();
+        if (this._customMaterial) {
+            return this._customMaterial;
+        }
+        if (this._premultipliedAlpha) {
+            return FastSpine.getSharedPmaMaterial(baseMat);
+        }
+        return baseMat;
+    }
+
+    /**
+     * Override UIRenderer._updateBlendFunc.
+     * Default UIRenderer._updateBlendFunc calls this.getMaterialInstance(0) whenever
+     * blendSrc !== default, which clones a unique MaterialInstance per node and causes
+     * Batcher2D to break batches on every character.
+     * By providing a shared Material with pre-configured blend states in _updateBuiltinMaterial,
+     * we avoid per-node material instantiation and preserve dynamic batching.
+     */
+    public _updateBlendFunc(): void {
+        // No-op to prevent per-node MaterialInstance cloning and maintain batching
+    }
+
     public _updateBlendFactors(): void {
         this._srcBlendFactor = this._premultipliedAlpha ? BlendFactor.ONE : BlendFactor.SRC_ALPHA;
         this._dstBlendFactor = BlendFactor.ONE_MINUS_SRC_ALPHA;
-        if (typeof (this as any)._updateBlendFunc === 'function') {
-            (this as any)._updateBlendFunc();
+        if (this._materialInstances && this._materialInstances[0]) {
+            this._materialInstances[0].destroy();
+            this._materialInstances[0] = null;
         }
         (this as any).updateMaterial?.();
     }
