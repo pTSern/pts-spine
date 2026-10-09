@@ -83,6 +83,7 @@ export class FastSpineAssembler implements IAssembler {
         const tintG = nodeColor.g / 255;
         const tintB = nodeColor.b / 255;
         const tintA = (nodeColor.a / 255) * nodeA;
+        const pma = comp.premultipliedAlpha ? tintA : 1;
 
         if (stride >= 9) {
             // Cocos Creator standard vfmtPosUvColor:
@@ -124,9 +125,9 @@ export class FastSpineAssembler implements IAssembler {
                 vbuf[vOffset + 4] = allUVs[uvIdx + 1];
 
                 const col = alpha >= 0.5 ? col2 : col1;
-                const cr = ((col & 0xff) / 255) * tintR;
-                const cg = (((col >> 8) & 0xff) / 255) * tintG;
-                const cb = (((col >> 16) & 0xff) / 255) * tintB;
+                const cr = ((col & 0xff) / 255) * tintR * pma;
+                const cg = (((col >> 8) & 0xff) / 255) * tintG * pma;
+                const cb = (((col >> 16) & 0xff) / 255) * tintB * pma;
                 const ca = (((col >> 24) & 0xff) / 255) * tintA;
 
                 vbuf[vOffset + 5] = cr;
@@ -174,9 +175,9 @@ export class FastSpineAssembler implements IAssembler {
                 vbuf[vOffset + 4] = allUVs[uvIdx + 1];
 
                 const col = alpha >= 0.5 ? col2 : col1;
-                const cr = Math.round((col & 0xff) * tintR);
-                const cg = Math.round(((col >> 8) & 0xff) * tintG);
-                const cb = Math.round(((col >> 16) & 0xff) * tintB);
+                const cr = Math.round((col & 0xff) * tintR * pma);
+                const cg = Math.round(((col >> 8) & 0xff) * tintG * pma);
+                const cb = Math.round(((col >> 16) & 0xff) * tintB * pma);
                 const ca = Math.round(((col >> 24) & 0xff) * tintA);
                 const packedCol = ((cr & 0xff) | ((cg & 0xff) << 8) | ((cb & 0xff) << 16) | ((ca & 0xff) << 24)) >>> 0;
                 u32Buf[vOffset + 5] = packedCol;

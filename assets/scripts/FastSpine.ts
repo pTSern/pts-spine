@@ -6,6 +6,19 @@ import { FastSpineBatchManager } from './FastSpineBatchManager';
 
 const { ccclass, property, executeInEditMode, menu, playOnFocus } = _decorator;
 
+export enum BlendFactor {
+    ZERO = 0,
+    ONE = 1,
+    SRC_ALPHA = 2,
+    DST_ALPHA = 3,
+    ONE_MINUS_SRC_ALPHA = 4,
+    ONE_MINUS_DST_ALPHA = 5,
+    SRC_COLOR = 6,
+    DST_COLOR = 7,
+    ONE_MINUS_SRC_COLOR = 8,
+    ONE_MINUS_DST_COLOR = 9,
+}
+
 export interface TrackEntry {
     trackIndex: number;
     animation: FastSpineAnimation | null;
@@ -81,6 +94,36 @@ export class FastSpine extends UIRenderer {
     @property({ tooltip: 'Enable global multi-drawcall dynamic batching' })
     public enableBatch = true;
 
+    @property({
+        displayName: 'Premultiplied Alpha',
+        tooltip: 'Enable premultiplied alpha (SrcBlend = ONE, DstBlend = ONE_MINUS_SRC_ALPHA) if spine texture was exported with premultiplied alpha',
+    })
+    protected _premultipliedAlpha = true;
+
+    @property({
+        displayName: 'Premultiplied Alpha',
+        tooltip: 'Enable premultiplied alpha (SrcBlend = ONE, DstBlend = ONE_MINUS_SRC_ALPHA) if spine texture was exported with premultiplied alpha',
+    })
+    public get premultipliedAlpha(): boolean {
+        return this._premultipliedAlpha;
+    }
+    public set premultipliedAlpha(val: boolean) {
+        if (this._premultipliedAlpha !== val) {
+            this._premultipliedAlpha = val;
+            this._updateBlendFactors();
+            this.markForUpdateRenderData();
+        }
+    }
+
+    public _updateBlendFactors(): void {
+        this._srcBlendFactor = this._premultipliedAlpha ? BlendFactor.ONE : BlendFactor.SRC_ALPHA;
+        this._dstBlendFactor = BlendFactor.ONE_MINUS_SRC_ALPHA;
+        if (typeof (this as any)._updateBlendFunc === 'function') {
+            (this as any)._updateBlendFunc();
+        }
+        (this as any).updateMaterial?.();
+    }
+
     // Runtime data
     private _data: FastSpineData = new FastSpineData();
     public get data(): FastSpineData {
@@ -114,11 +157,13 @@ export class FastSpine extends UIRenderer {
 
     public __preload(): void {
         super.__preload();
+        this._updateBlendFactors();
         this._flushAssembler();
     }
 
     public onLoad(): void {
         super.onLoad();
+        this._updateBlendFactors();
         this._flushAssembler();
         this._initData();
     }
