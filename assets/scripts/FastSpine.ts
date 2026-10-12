@@ -444,14 +444,17 @@ export class FastSpine extends UIRenderer {
     }
 
     private _checkEvents(anim: FastSpineAnimation, oldTime: number, newTime: number): void {
-        if (this._data.events.length === 0) return;
+        if (!this._data || !this._data.events || this._data.events.length === 0) return;
         const dur = anim.duration > 0 ? anim.duration : 1 / this._data.fps;
         const t1 = entryLoopTime(oldTime, dur, this.loop);
         const t2 = entryLoopTime(newTime, dur, this.loop);
 
         for (const ev of this._data.events) {
             if (ev.frame >= anim.startFrame && ev.frame < anim.startFrame + anim.frameCount) {
-                if (ev.time >= t1 && ev.time <= t2) {
+                const inRange = t2 >= t1
+                    ? (ev.time >= t1 && ev.time <= t2)
+                    : (ev.time >= t1 || ev.time <= t2);
+                if (inRange) {
                     this._emitEvent(FastSpineEventType.EVENT, this._currentTrack!, ev);
                     if (this._eventListener && this._currentTrack) {
                         this._eventListener(this._currentTrack, ev);

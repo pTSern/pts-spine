@@ -24,6 +24,7 @@ export interface FastSpineEvent {
     intValue: number;
     floatValue: number;
     stringValue: string;
+    data?: { name: string };
 }
 
 export interface FastSpineFrameView {
@@ -295,6 +296,7 @@ export class FastSpineData {
                 intValue,
                 floatValue,
                 stringValue: strVal,
+                data: { name: nameStr },
             });
         }
     }
