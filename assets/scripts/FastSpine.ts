@@ -1,9 +1,9 @@
-import { _decorator, UIRenderer, BufferAsset, Texture2D, JsonAsset, Material, EventTarget, assetManager, UITransform, CCClass } from 'cc';
+import { _decorator, UIRenderer, BufferAsset, Texture2D, Material, EventTarget, assetManager, UITransform, CCClass } from 'cc';
 import { EDITOR } from 'cc/env';
 import { FastSpineData, FastSpineAnimation, FastSpineEvent } from './FastSpineData';
 import { fastSpineAssembler } from './FastSpineAssembler';
 import { FastSpineBatchManager } from './FastSpineBatchManager';
-import { CC_EnumList, CC_IEnumList } from 'db://pts-core/scripts/interfaces/cc/CC.IEnumable';
+import { CC_IEnumList } from 'db://pts-core/scripts/interfaces/cc/CC.IEnumable';
 
 const { ccclass, property, executeInEditMode, menu, playOnFocus } = _decorator;
 
@@ -60,7 +60,6 @@ export class FastSpine extends UIRenderer {
         this._fastSpineData = val;
         this._initData();
         this.onFocusInEditor();
-
     }
 
     @property({ type: Texture2D, tooltip: 'Atlas texture page' })
