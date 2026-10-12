@@ -23,6 +23,8 @@ exports.methods = {
             skin: options.skin || 'default',
             outputDir: options.outputDir,
             createPrefab: options.createPrefab !== false,
+            createJson: options.createJson === true,
+            interpolateFrames: options.interpolateFrames !== false,
         });
     },
 };

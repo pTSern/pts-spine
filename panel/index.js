@@ -5,6 +5,9 @@ const fs = require('fs');
 const { AssetExporter } = require('../lib/asset-exporter');
 
 const OUTPUT_KEY = 'pts-spine.output';
+const PREFAB_KEY = 'pts-spine.createPrefab';
+const JSON_KEY = 'pts-spine.createJson';
+const INTERP_KEY = 'pts-spine.interp';
 
 function filePathOf(file) {
     if (file.path) return file.path;
@@ -47,6 +50,7 @@ module.exports = Editor.Panel.define({
         </select>
       </div>
       <label class="check"><input id="prefab" type="checkbox" checked> Create Prefabs</label>
+      <label class="check"><input id="json" type="checkbox"> Create JSON</label>
       <label class="check"><input id="interp" type="checkbox" checked> Frame Interpolation</label>
     </div>
   </div>
@@ -94,7 +98,7 @@ module.exports = Editor.Panel.define({
 .row { display: flex; align-items: center; gap: 8px; }
 .row label { white-space: nowrap; font-size: 11px; color: #8b949e; }
 .row input[type=text] { flex: 1; padding: 4px 6px; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; font-size: 11px; }
-.row-opts { display: flex; align-items: center; gap: 14px; }
+.row-opts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .row-opt { display: flex; align-items: center; gap: 6px; }
 .row-opt select { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 2px 6px; font-size: 11px; }
 .check { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: #c9d1d9; }
@@ -140,6 +144,7 @@ button:disabled { opacity: 0.45; cursor: default; }
         output: '#output',
         fps: '#fps',
         prefab: '#prefab',
+        json: '#json',
         interp: '#interp',
         summary: '#summary',
         list: '#list',
@@ -283,6 +288,13 @@ button:disabled { opacity: 0.45; cursor: default; }
                 animPill.textContent = `${item.animationsCount || 0} anims`;
                 pills.appendChild(animPill);
 
+                if (item.skinsCount && item.skinsCount > 1) {
+                    const skinPill = document.createElement('span');
+                    skinPill.className = 'pill pill-orange';
+                    skinPill.textContent = `${item.skinsCount} skins`;
+                    pills.appendChild(skinPill);
+                }
+
                 row.appendChild(pills);
                 this.$.list.appendChild(row);
             }
@@ -298,7 +310,7 @@ button:disabled { opacity: 0.45; cursor: default; }
             this.$.exportBin.disabled = !hasSel;
         },
 
-        async bakeSelected() {
+        async bakeSelected(opts = {}) {
             const selected = (this.items || []).filter(i => i.selected);
             if (!selected.length) return;
 
@@ -307,7 +319,9 @@ button:disabled { opacity: 0.45; cursor: default; }
             this.updateSummary();
 
             const fps = parseInt(this.$.fps.value, 10) || 30;
-            const createPrefab = this.$.prefab.checked;
+            const createPrefab = opts.forceOnlyBin ? false : this.$.prefab.checked;
+            const createJson = opts.forceOnlyBin ? false : this.$.json.checked;
+            const interpolateFrames = this.$.interp.checked;
             let outputFolder = this.$.output.value.trim();
 
             let targetDir = null;
@@ -320,7 +334,11 @@ button:disabled { opacity: 0.45; cursor: default; }
                 }
             }
 
-            log.info(`--- Starting Bake (${selected.length} items, ${fps} FPS) ---`);
+            const exportTypes = opts.forceOnlyBin
+                ? 'Binary only'
+                : [createPrefab && 'Prefab', createJson && 'JSON', 'Binary'].filter(Boolean).join(' + ');
+
+            log.info(`--- Starting Bake (${selected.length} items, ${fps} FPS, [${exportTypes}]) ---`);
             let successCount = 0;
 
             try {
@@ -332,9 +350,13 @@ button:disabled { opacity: 0.45; cursor: default; }
                             fps,
                             outputDir: outDir,
                             createPrefab,
+                            createJson,
+                            interpolateFrames,
                         });
-                        const dur = res.metadata.animations ? res.metadata.animations.reduce((sum, a) => sum + a.duration, 0) : 0;
-                        log.ok(`✓ ${item.name}: ${res.metadata.totalFrames} frames, ${res.metadata.vertexCountPerFrame} verts/frame (${res.metadata.binarySize} bytes)`);
+                        const createdOutputs = ['bin'];
+                        if (res.prefabPath) createdOutputs.push('prefab');
+                        if (res.jsonPath) createdOutputs.push('json');
+                        log.ok(`✓ ${item.name}: ${res.metadata.totalFrames} frames [${createdOutputs.join(', ')}] (${res.metadata.binarySize} bytes)`);
                         successCount++;
                     } catch (e) {
                         log.error(`✗ ${item.name}: ${e.message}`);
@@ -352,12 +374,43 @@ button:disabled { opacity: 0.45; cursor: default; }
     ready() {
         this.items = [];
         this.busy = false;
+
+        // Restore settings from localStorage
         let saved = null;
         try { saved = localStorage.getItem(OUTPUT_KEY); } catch (e) {}
         this.$.output.value = saved || 'db://assets/FastSpine';
 
+        let savedPrefab = null;
+        try { savedPrefab = localStorage.getItem(PREFAB_KEY); } catch (e) {}
+        if (savedPrefab !== null) {
+            this.$.prefab.checked = savedPrefab === 'true';
+        }
+
+        let savedJson = null;
+        try { savedJson = localStorage.getItem(JSON_KEY); } catch (e) {}
+        if (savedJson !== null) {
+            this.$.json.checked = savedJson === 'true';
+        } else {
+            this.$.json.checked = false;
+        }
+
+        let savedInterp = null;
+        try { savedInterp = localStorage.getItem(INTERP_KEY); } catch (e) {}
+        if (savedInterp !== null) {
+            this.$.interp.checked = savedInterp === 'true';
+        }
+
         this.$.output.onchange = () => {
             try { localStorage.setItem(OUTPUT_KEY, this.$.output.value.trim()); } catch (e) {}
+        };
+        this.$.prefab.onchange = () => {
+            try { localStorage.setItem(PREFAB_KEY, String(this.$.prefab.checked)); } catch (e) {}
+        };
+        this.$.json.onchange = () => {
+            try { localStorage.setItem(JSON_KEY, String(this.$.json.checked)); } catch (e) {}
+        };
+        this.$.interp.onchange = () => {
+            try { localStorage.setItem(INTERP_KEY, String(this.$.interp.checked)); } catch (e) {}
         };
 
         this.$.scan.onclick = () => this.scanProject();
@@ -373,7 +426,7 @@ button:disabled { opacity: 0.45; cursor: default; }
         };
 
         this.$.convert.onclick = () => this.bakeSelected();
-        this.$.exportBin.onclick = () => this.bakeSelected();
+        this.$.exportBin.onclick = () => this.bakeSelected({ forceOnlyBin: true });
 
         // Drag & Drop
         this.$.drop.ondragover = (e) => {

@@ -1,4 +1,4 @@
-import { _decorator, UIRenderer, BufferAsset, Texture2D, Material, EventTarget, assetManager, UITransform, CCClass } from 'cc';
+import { _decorator, UIRenderer, BufferAsset, Texture2D, Material, EventTarget, assetManager, UITransform, CCClass, Asset } from 'cc';
 import { EDITOR } from 'cc/env';
 import { FastSpineData, FastSpineAnimation, FastSpineEvent } from './FastSpineData';
 import { fastSpineAssembler } from './FastSpineAssembler';
@@ -75,6 +75,27 @@ export class FastSpine extends UIRenderer {
         FastSpineBatchManager.instance.updateRegistration(this);
     }
 
+    @property({ displayName: 'Default Skin', tooltip: 'Default skin name' })
+    protected _defaultSkin = '';
+
+    @property({ displayName: 'Default Skin', tooltip: 'Default skin name' })
+    public get defaultSkin(): string {
+        return this._defaultSkin;
+    }
+    public set defaultSkin(val: string) {
+        if (this._defaultSkin !== val) {
+            this._defaultSkin = val;
+            this.setSkin(val);
+        }
+    }
+
+    public get skin(): string {
+        return this._data && this._data.currentSkinName ? this._data.currentSkinName : this._defaultSkin;
+    }
+    public set skin(val: string) {
+        this.setSkin(val);
+    }
+
     @property({ tooltip: 'Default animation name' })
     public defaultAnimation = '';
 
@@ -115,13 +136,23 @@ export class FastSpine extends UIRenderer {
     }
 
     onFocusInEditor(): void {
-        if(!this._data) {
+        if (!this._data || !this._data.isValid) {
             CCClass.Attr.setClassAttr(this, 'defaultAnimation', 'type', "CCString");
+            CCClass.Attr.setClassAttr(this, 'defaultSkin', 'type', "CCString");
             return;
         }
 
+        const skins = this._data.getSkinNames();
+        if (skins && skins.length > 0) {
+            const skinList = CC_IEnumList.generator(skins);
+            CCClass.Attr.setClassAttr(this, 'defaultSkin', 'type', "Enum");
+            CCClass.Attr.setClassAttr(this, 'defaultSkin', 'enumList', skinList);
+        } else {
+            CCClass.Attr.setClassAttr(this, 'defaultSkin', 'type', "CCString");
+        }
+
         const _data = this._data.getAnimationNames();
-        const _list = CC_IEnumList.generator(_data)
+        const _list = CC_IEnumList.generator(_data);
         CCClass.Attr.setClassAttr(this, 'defaultAnimation', 'type', "Enum");
         CCClass.Attr.setClassAttr(this, 'defaultAnimation', 'enumList', _list);
     }
@@ -196,7 +227,6 @@ export class FastSpine extends UIRenderer {
     private _currentTrack: TrackEntry | null = null;
     private _tracks: Map<number, TrackEntry> = new Map();
     private _eventTarget: EventTarget = new EventTarget();
-    private _lastEmittedFrame = -1;
 
     private _completeListener: ((entry: TrackEntry) => void) | null = null;
     private _eventListener: ((entry: TrackEntry, event: FastSpineEvent) => void) | null = null;
@@ -327,11 +357,14 @@ export class FastSpine extends UIRenderer {
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         const pos = this._data.allPositions;
         const cols = this._data.allColors;
-        const count = Math.min(pos.length, this._data.vertexCountPerFrame * 2);
-        for (let i = 0; i < count; i += 2) {
-            if (cols && cols.length > i / 2 && (cols[i / 2] >>> 24) === 0) continue;
-            const x = pos[i];
-            const y = pos[i + 1];
+        const startFrame = this._data.currentSkin ? this._data.currentSkin.startFrame : 0;
+        const vc = this._data.vertexCountPerFrame;
+        const base = startFrame * vc;
+
+        for (let i = 0; i < vc; i++) {
+            if (cols && cols.length > base + i && (cols[base + i] >>> 24) === 0) continue;
+            const x = pos[(base + i) * 2];
+            const y = pos[(base + i) * 2 + 1];
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
@@ -350,6 +383,12 @@ export class FastSpine extends UIRenderer {
         const buffer = this._getBuffer();
         if (buffer) {
             if (this._data.parse(buffer)) {
+                const skins = this._data.getSkinNames();
+                if (this._defaultSkin && skins.includes(this._defaultSkin)) {
+                    this.setSkin(this._defaultSkin);
+                } else if (skins.length > 0) {
+                    this.setSkin(skins[0]);
+                }
                 this._updateContentSize();
                 if (this.defaultAnimation) {
                     this.setAnimation(0, this.defaultAnimation, this.loop);
@@ -359,12 +398,13 @@ export class FastSpine extends UIRenderer {
                         this.setAnimation(0, anims[0], this.loop);
                     }
                 }
+                this.onFocusInEditor();
             }
         } else if (this._fastSpineData) {
             const asset = this._fastSpineData as any;
             const uuid = asset._uuid || asset.uuid;
             if (uuid && typeof assetManager !== 'undefined') {
-                assetManager.loadAny({ uuid }, (err, loadedAsset) => {
+                assetManager.loadAny({ uuid }, (err: Error, loadedAsset: Asset) => {
                     if (!err && loadedAsset) {
                         this._initData();
                     }
@@ -449,7 +489,7 @@ export class FastSpine extends UIRenderer {
     /**
      * Drop-in sp.Skeleton API: Add animation to queue
      */
-    public addAnimation(trackIndex: number, animName: string, loop = true, delay = 0): TrackEntry | null {
+    public addAnimation(trackIndex: number, animName: string, loop = true): TrackEntry | null {
         // Queue or set
         if (!this._tracks.has(trackIndex)) {
             return this.setAnimation(trackIndex, animName, loop);
@@ -480,8 +520,43 @@ export class FastSpine extends UIRenderer {
         return this._data.getAnimationNames();
     }
 
-    public setSkin(skinName: string): void {
-        // Baked skin switcher
+    /**
+     * Drop-in sp.Skeleton API: Set active skin
+     */
+    public setSkin(skinName: string): boolean {
+        this._defaultSkin = skinName;
+        if (!this._data || !this._data.isValid) {
+            return false;
+        }
+
+        const ok = this._data.setSkin(skinName);
+        if (!ok) {
+            return false;
+        }
+
+        // Rebind track animations to the newly selected skin
+        for (const [, entry] of this._tracks) {
+            if (entry && entry.animationName) {
+                const newAnim = this._data.findAnimation(entry.animationName, skinName);
+                if (newAnim) {
+                    entry.animation = newAnim;
+                }
+            }
+        }
+        if (this._currentTrack && this._currentTrack.animationName) {
+            const newAnim = this._data.findAnimation(this._currentTrack.animationName, skinName);
+            if (newAnim) {
+                this._currentTrack.animation = newAnim;
+            }
+        }
+
+        this._updateContentSize();
+        this.markForUpdateRenderData();
+        return true;
+    }
+
+    public getSkinNames(): string[] {
+        return this._data ? this._data.getSkinNames() : [];
     }
 
     public setCompleteListener(listener: (entry: TrackEntry) => void): void {
@@ -514,7 +589,8 @@ export class FastSpine extends UIRenderer {
         return this._data.getFrameProgress(
             this._currentTrack.animationName,
             this._currentTrack.trackTime,
-            this._currentTrack.loop
+            this._currentTrack.loop,
+            this._data.currentSkinName
         );
     }
 }

@@ -8,13 +8,13 @@
   "editor": ">=3.8.0",
   "panels": {
     "default": {
-      "title": "Fast Spine Optimizer",
+      "title": "Fast Spine",
       "type": "dockable",
       "main": "./panel/index.js",
       "size": {
-        "min-width": 500,
-        "min-height": 450,
-        "width": 640,
+        "min-width": 360,
+        "min-height": 480,
+        "width": 560,
         "height": 720
       }
     }
@@ -22,8 +22,8 @@
   "contributions": {
     "menu": [
       {
-        "path": "i18n:menu.extension",
-        "label": "pTSpine (Fast Spine Optimizer)",
+        "path": "i18n:menu.extension/pTS-Spine",
+        "label": "Open Panel",
         "message": "open-panel"
       }
     ],

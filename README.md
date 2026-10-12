@@ -138,6 +138,9 @@ console.log(`CPU time saved: ~${stats.estimatedCpuTimeSavedMs} ms/frame`);
 
 1. Open **Extension → pTSpine (Fast Spine Optimizer)** in the Cocos Creator menu.
 2. Click **Scan Project Spines** or drag & drop Spine `.json` skeletons.
-3. Configure target FPS (30 or 60) and output folder (default `db://assets/FastSpine`).
-4. Click **Bake Selected Spines**.
+3. Configure target FPS (30 or 60), output folder (default `db://assets/FastSpine`), and export options:
+   - **Create Prefabs**: Generates ready-to-use Cocos Creator prefab nodes configured with `FastSpine`.
+   - **Create JSON**: (Optional) Exports readable `.fastspine.json` metadata alongside binary. Uncheck to keep project assets clean.
+   - **Frame Interpolation**: Enables runtime sub-frame tweening for silky 60fps playback.
+4. Click **Bake Selected Spines** (or **Export .fastspine Binary** for standalone binaries).
 5. Use generated `.fastspine.bin` assets and prefabs directly in your scenes.

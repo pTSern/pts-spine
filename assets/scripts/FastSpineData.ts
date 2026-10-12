@@ -9,6 +9,14 @@ export interface FastSpineAnimation {
     loop: boolean;
 }
 
+export interface FastSpineSkin {
+    name: string;
+    startFrame: number;
+    frameCount: number;
+    animations: Map<string, FastSpineAnimation>;
+    animationList: FastSpineAnimation[];
+}
+
 export interface FastSpineEvent {
     name: string;
     frame: number;
@@ -46,6 +54,9 @@ export class FastSpineData {
 
     public animations: Map<string, FastSpineAnimation> = new Map();
     public animationList: FastSpineAnimation[] = [];
+    public skins: Map<string, FastSpineSkin> = new Map();
+    public skinList: FastSpineSkin[] = [];
+    public currentSkinName = '';
     public events: FastSpineEvent[] = [];
 
     private _isValid = false;
@@ -84,12 +95,12 @@ export class FastSpineData {
         const animTableOffset = dataView.getUint32(16, true);
         const eventTableOffset = dataView.getUint32(20, true);
         const bufferDataOffset = dataView.getUint32(24, true);
+        const skinTableOffset = dataView.getUint32(28, true);
 
         const totalVertices = this.frameCount * this.vertexCountPerFrame;
 
         // Byte offsets for frame streams
         // Stream layout per frame: [x,y]*vc, [u,v]*vc, [col]*vc
-        // Or packed sequentially:
         // We unpack directly into continuous typed arrays for maximum GPU cache locality
         this.allPositions = new Float32Array(totalVertices * 2);
         this.allUVs = new Float32Array(totalVertices * 2);
@@ -128,6 +139,25 @@ export class FastSpineData {
 
         // Decode Events
         this._decodeEvents(dataView, u8, eventTableOffset);
+
+        // Decode Skins
+        if (skinTableOffset && skinTableOffset > 0 && skinTableOffset < arrayBuffer.byteLength) {
+            this._decodeSkins(dataView, u8, skinTableOffset);
+        } else {
+            const defSkin: FastSpineSkin = {
+                name: 'default',
+                startFrame: 0,
+                frameCount: this.frameCount,
+                animations: new Map(this.animations),
+                animationList: [...this.animationList],
+            };
+            this.skins.set('default', defSkin);
+            this.skinList = [defSkin];
+        }
+
+        if (this.skinList.length > 0 && !this.currentSkinName) {
+            this.currentSkinName = this.skinList[0].name;
+        }
 
         this._isValid = true;
         return true;
@@ -168,6 +198,70 @@ export class FastSpineData {
         }
     }
 
+    private _decodeSkins(view: DataView, u8: Uint8Array, offset: number): void {
+        this.skins.clear();
+        this.skinList = [];
+        if (!offset || offset >= view.byteLength) return;
+
+        let ptr = offset;
+        const count = view.getUint16(ptr, true); ptr += 2;
+        const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null;
+
+        for (let i = 0; i < count; i++) {
+            const nameLen = view.getUint16(ptr, true); ptr += 2;
+            const nameStr = decoder
+                ? decoder.decode(u8.subarray(ptr, ptr + nameLen))
+                : String.fromCharCode.apply(null, Array.from(u8.subarray(ptr, ptr + nameLen)));
+            ptr += nameLen;
+
+            const startFrame = view.getUint16(ptr, true); ptr += 2;
+            const frameCount = view.getUint16(ptr, true); ptr += 2;
+
+            const animCount = view.getUint16(ptr, true); ptr += 2;
+            const animMap = new Map<string, FastSpineAnimation>();
+            const animList: FastSpineAnimation[] = [];
+
+            for (let a = 0; a < animCount; a++) {
+                const aNameLen = view.getUint16(ptr, true); ptr += 2;
+                const aName = decoder
+                    ? decoder.decode(u8.subarray(ptr, ptr + aNameLen))
+                    : String.fromCharCode.apply(null, Array.from(u8.subarray(ptr, ptr + aNameLen)));
+                ptr += aNameLen;
+
+                const aStartFrame = view.getUint16(ptr, true); ptr += 2;
+                const aFrameCount = view.getUint16(ptr, true); ptr += 2;
+                const duration = view.getFloat32(ptr, true); ptr += 4;
+                const fps = view.getUint8(ptr); ptr += 1;
+                const loop = view.getUint8(ptr) === 1; ptr += 1;
+
+                const anim: FastSpineAnimation = {
+                    name: aName,
+                    startFrame: aStartFrame,
+                    frameCount: aFrameCount,
+                    duration,
+                    fps,
+                    loop,
+                };
+                animMap.set(aName, anim);
+                animList.push(anim);
+            }
+
+            const skin: FastSpineSkin = {
+                name: nameStr,
+                startFrame,
+                frameCount,
+                animations: animMap,
+                animationList: animList,
+            };
+            this.skins.set(nameStr, skin);
+            this.skinList.push(skin);
+        }
+
+        if (this.skinList.length > 0) {
+            this.currentSkinName = this.skinList[0].name;
+        }
+    }
+
     private _decodeEvents(view: DataView, u8: Uint8Array, offset: number): void {
         this.events = [];
         if (!offset || offset >= view.byteLength) return;
@@ -205,19 +299,47 @@ export class FastSpineData {
         }
     }
 
-    public findAnimation(name: string): FastSpineAnimation | null {
+    public getSkinNames(): string[] {
+        return this.skinList.map(s => s.name);
+    }
+
+    public findSkin(name: string): FastSpineSkin | null {
+        return this.skins.get(name) || null;
+    }
+
+    public setSkin(name: string): boolean {
+        const s = this.findSkin(name);
+        if (!s) return false;
+        this.currentSkinName = s.name;
+        return true;
+    }
+
+    public get currentSkin(): FastSpineSkin | null {
+        return this.findSkin(this.currentSkinName) || this.skinList[0] || null;
+    }
+
+    public findAnimation(name: string, skinName?: string): FastSpineAnimation | null {
+        const skin = skinName ? this.findSkin(skinName) : this.currentSkin;
+        if (skin) {
+            const anim = skin.animations.get(name);
+            if (anim) return anim;
+        }
         return this.animations.get(name) || null;
     }
 
-    public getAnimationNames(): string[] {
+    public getAnimationNames(skinName?: string): string[] {
+        const skin = skinName ? this.findSkin(skinName) : this.currentSkin;
+        if (skin) {
+            return skin.animationList.map(a => a.name);
+        }
         return this.animationList.map(a => a.name);
     }
 
     /**
      * Compute current frame index and sub-frame alpha for interpolation
      */
-    public getFrameProgress(animName: string, time: number, loop: boolean): { frame1: number, frame2: number, alpha: number, isComplete: boolean } {
-        const anim = this.findAnimation(animName);
+    public getFrameProgress(animName: string, time: number, loop: boolean, skinName?: string): { frame1: number, frame2: number, alpha: number, isComplete: boolean } {
+        const anim = this.findAnimation(animName, skinName);
         if (!anim || anim.frameCount <= 0) {
             return { frame1: 0, frame2: 0, alpha: 0, isComplete: true };
         }
