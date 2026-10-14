@@ -223,6 +223,7 @@ export class FastSpine extends UIRenderer {
     public get data(): FastSpineData {
         return this._data;
     }
+    public _curDrawOrderId = -1;
 
     private _currentTrack: TrackEntry | null = null;
     private _tracks: Map<number, TrackEntry> = new Map();

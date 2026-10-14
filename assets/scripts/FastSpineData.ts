@@ -59,6 +59,8 @@ export class FastSpineData {
     public skinList: FastSpineSkin[] = [];
     public currentSkinName = '';
     public events: FastSpineEvent[] = [];
+    public drawOrders: Uint16Array[] = [];
+    public frameDrawOrderIds: Uint16Array = new Uint16Array(0);
 
     private _isValid = false;
 
@@ -97,6 +99,10 @@ export class FastSpineData {
         const eventTableOffset = dataView.getUint32(20, true);
         const bufferDataOffset = dataView.getUint32(24, true);
         const skinTableOffset = dataView.getUint32(28, true);
+        let drawOrderTableOffset = 0;
+        if (bufferDataOffset >= 36 && arrayBuffer.byteLength >= 36) {
+            drawOrderTableOffset = dataView.getUint32(32, true);
+        }
 
         const totalVertices = this.frameCount * this.vertexCountPerFrame;
 
@@ -154,6 +160,14 @@ export class FastSpineData {
             };
             this.skins.set('default', defSkin);
             this.skinList = [defSkin];
+        }
+
+        // Decode Draw Orders
+        if (drawOrderTableOffset && drawOrderTableOffset > 0 && drawOrderTableOffset < arrayBuffer.byteLength) {
+            this._decodeDrawOrders(dataView, drawOrderTableOffset);
+        } else {
+            this.drawOrders = [];
+            this.frameDrawOrderIds = new Uint16Array(0);
         }
 
         if (this.skinList.length > 0 && !this.currentSkinName) {
@@ -381,4 +395,63 @@ export class FastSpineData {
             isComplete,
         };
     }
+
+    /**
+     * Get index buffer for a given frame index considering Spine drawOrder timeline
+     */
+    public getIndices(frameIndex: number): Uint16Array {
+        if (this.drawOrders.length > 0 && frameIndex >= 0 && frameIndex < this.frameDrawOrderIds.length) {
+            const orderId = this.frameDrawOrderIds[frameIndex];
+            if (orderId < this.drawOrders.length) {
+                return this.drawOrders[orderId];
+            }
+        }
+        return this.indices;
+    }
+
+    /**
+     * Get draw order permutation ID for a given frame index
+     */
+    public getDrawOrderId(frameIndex: number): number {
+        if (this.frameDrawOrderIds.length > 0 && frameIndex >= 0 && frameIndex < this.frameDrawOrderIds.length) {
+            return this.frameDrawOrderIds[frameIndex];
+        }
+        return 0;
+    }
+
+    /**
+     * Get index buffer directly by unique draw order ID
+     */
+    public getIndicesByOrderId(orderId: number): Uint16Array {
+        if (orderId >= 0 && orderId < this.drawOrders.length) {
+            return this.drawOrders[orderId];
+        }
+        return this.indices;
+    }
+
+    private _decodeDrawOrders(view: DataView, offset: number): void {
+        this.drawOrders = [];
+        if (!offset || offset >= view.byteLength) return;
+
+        let ptr = offset;
+        const count = view.getUint16(ptr, true); ptr += 2;
+        const indexCount = view.getUint32(ptr, true); ptr += 4;
+
+        for (let i = 0; i < count; i++) {
+            const indices = new Uint16Array(indexCount);
+            for (let j = 0; j < indexCount; j++) {
+                indices[j] = view.getUint16(ptr, true);
+                ptr += 2;
+            }
+            this.drawOrders.push(indices);
+        }
+
+        const frameCount = view.getUint16(ptr, true); ptr += 2;
+        this.frameDrawOrderIds = new Uint16Array(frameCount);
+        for (let i = 0; i < frameCount; i++) {
+            this.frameDrawOrderIds[i] = view.getUint16(ptr, true);
+            ptr += 2;
+        }
+    }
 }
+

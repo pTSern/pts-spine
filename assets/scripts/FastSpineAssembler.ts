@@ -28,11 +28,22 @@ export class FastSpineAssembler implements IAssembler {
         }
         if (!rd) return;
 
+        const progress = comp.getPlaybackProgress();
+        const curFrame = (comp.interpolateFrames && progress.alpha >= 0.5) ? progress.frame2 : progress.frame1;
+        const curOrderId = spineData.getDrawOrderId(curFrame);
+        const activeIndices = spineData.getIndices(curFrame);
+
         // Resize render buffers if sizes changed
         if (rd.vertexCount !== vc || rd.indexCount !== ic || !rd.chunk) {
             rd.resize(vc, ic);
             if (rd.chunk) {
-                rd.chunk.setIndexBuffer(spineData.indices);
+                rd.chunk.setIndexBuffer(activeIndices);
+                (comp as any)._curDrawOrderId = curOrderId;
+            }
+        } else if ((comp as any)._curDrawOrderId !== curOrderId) {
+            (comp as any)._curDrawOrderId = curOrderId;
+            if (rd.chunk) {
+                rd.chunk.setIndexBuffer(activeIndices);
             }
         }
 
@@ -200,7 +211,9 @@ export class FastSpineAssembler implements IAssembler {
         const meshBuffer = chunk.meshBuffer;
         if (!meshBuffer) return;
 
-        const indices = comp.data.indices;
+        const progress = comp.getPlaybackProgress();
+        const curFrame = (comp.interpolateFrames && progress.alpha >= 0.5) ? progress.frame2 : progress.frame1;
+        const indices = comp.data.getIndices(curFrame);
         const ic = indices.length;
         if (ic <= 0) return;
 
