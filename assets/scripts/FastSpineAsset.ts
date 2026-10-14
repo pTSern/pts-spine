@@ -1,4 +1,4 @@
-import { _decorator, BufferAsset, CCClass, CCInteger, EAxisDirection, sp } from "cc";
+import { _decorator, BufferAsset, CCClass, CCInteger, sp } from "cc";
 import { pTSAsset } from "db://pts-core/scripts/utils";
 import { FastSpineData } from "./FastSpineData";
 import { EDITOR } from "cc/env";
@@ -75,6 +75,6 @@ export class FastSpineAsset extends pTSAsset {
 
     execute(target: FastSpine | sp.Skeleton) {
         if(!target) return null;
-        return target.setAnimation(this.tracker, this.anim, this.loop);
+        return target.setAnimation(this.tracker, this.anim, this.loop, this.mix);
     }
 }

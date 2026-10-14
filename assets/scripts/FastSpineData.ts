@@ -33,6 +33,23 @@ export interface FastSpineFrameView {
     colors: Uint32Array;
 }
 
+export interface FastSpineFrameProgress {
+    frame1: number;
+    frame2: number;
+    alpha: number;
+    isComplete: boolean;
+}
+
+export interface FastSpinePlaybackProgress extends FastSpineFrameProgress {
+    isMixing: boolean;
+    mixAlpha: number; // 0..1
+    fromFrame1: number;
+    fromFrame2: number;
+    fromAlpha: number;
+    fromOrderId: number;
+    toOrderId: number;
+}
+
 const MAGIC_STR = 'FSPN';
 const HEADER_SIZE = 32;
 
@@ -354,7 +371,7 @@ export class FastSpineData {
     /**
      * Compute current frame index and sub-frame alpha for interpolation
      */
-    public getFrameProgress(animName: string, time: number, loop: boolean, skinName?: string): { frame1: number, frame2: number, alpha: number, isComplete: boolean } {
+    public getFrameProgress(animName: string, time: number, loop: boolean, skinName?: string): FastSpineFrameProgress {
         const anim = this.findAnimation(animName, skinName);
         if (!anim || anim.frameCount <= 0) {
             return { frame1: 0, frame2: 0, alpha: 0, isComplete: true };

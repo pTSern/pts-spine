@@ -1,6 +1,6 @@
 import { _decorator, UIRenderer, BufferAsset, Texture2D, Material, EventTarget, assetManager, UITransform, CCClass, Asset } from 'cc';
 import { EDITOR } from 'cc/env';
-import { FastSpineData, FastSpineAnimation, FastSpineEvent } from './FastSpineData';
+import { FastSpineData, FastSpineAnimation, FastSpineEvent, FastSpinePlaybackProgress } from './FastSpineData';
 import { fastSpineAssembler } from './FastSpineAssembler';
 import { FastSpineBatchManager } from './FastSpineBatchManager';
 import { CC_IEnumList } from 'db://pts-core/scripts/interfaces/cc/CC.IEnumable';
@@ -28,6 +28,14 @@ export interface TrackEntry {
     delay: number;
     trackTime: number;
     isComplete: boolean;
+
+    // Mixing & Queueing
+    mixDuration: number;
+    mixTime: number;
+    mixingFrom: TrackEntry | null;
+    mixingTo: TrackEntry | null;
+    next: TrackEntry | null;
+    alpha: number;
 }
 
 export enum FastSpineEventType {
@@ -113,6 +121,9 @@ export class FastSpine extends UIRenderer {
 
     @property({ tooltip: 'Enable global multi-drawcall dynamic batching' })
     public enableBatch = true;
+
+    @property({ tooltip: 'Default crossfade mix duration (seconds) between animations' })
+    public defaultMix = 0;
 
     @property({
         displayName: 'Premultiplied Alpha',
@@ -231,6 +242,23 @@ export class FastSpine extends UIRenderer {
 
     private _completeListener: ((entry: TrackEntry) => void) | null = null;
     private _eventListener: ((entry: TrackEntry, event: FastSpineEvent) => void) | null = null;
+
+    // Mixing table: key = `${fromAnim}->${toAnim}`, value = duration
+    private _mixTable: Map<string, number> = new Map();
+
+    public setMix(fromAnimation: string, toAnimation: string, duration: number): void {
+        if (!fromAnimation || !toAnimation) return;
+        this._mixTable.set(`${fromAnimation}->${toAnimation}`, Math.max(0, duration));
+    }
+
+    public getMix(fromAnimation: string, toAnimation: string): number {
+        if (!fromAnimation || !toAnimation) return this.defaultMix;
+        const key = `${fromAnimation}->${toAnimation}`;
+        if (this._mixTable.has(key)) {
+            return this._mixTable.get(key)!;
+        }
+        return this.defaultMix;
+    }
 
     public get animation(): string {
         return this._currentTrack ? this._currentTrack.animationName : this.defaultAnimation;
@@ -420,15 +448,29 @@ export class FastSpine extends UIRenderer {
     }
 
     public update(dt: number): void {
-        if (this.paused || !this._currentTrack || !this._data.isValid) return;
+        if (this.paused || !this._data || !this._data.isValid) return;
 
         const effectiveDt = dt * this.timeScale;
-        const entry = this._currentTrack;
-        const oldTime = entry.trackTime;
-        entry.trackTime += effectiveDt;
+        if (effectiveDt === 0) return;
 
-        const anim = entry.animation;
-        if (anim) {
+        for (const [trackIndex, entry] of this._tracks) {
+            if (!entry || !entry.animation) continue;
+
+            const oldTime = entry.trackTime;
+            entry.trackTime += effectiveDt;
+
+            // Advance mixing from entry
+            if (entry.mixingFrom) {
+                const from = entry.mixingFrom;
+                from.trackTime += effectiveDt;
+                entry.mixTime += effectiveDt;
+                if (entry.mixTime >= entry.mixDuration) {
+                    this._emitEvent(FastSpineEventType.END, from);
+                    entry.mixingFrom = null;
+                }
+            }
+
+            const anim = entry.animation;
             const dur = anim.duration > 0 ? anim.duration : 1 / this._data.fps;
             // Check completion
             if (!entry.loop && entry.trackTime >= dur && !entry.isComplete) {
@@ -438,17 +480,35 @@ export class FastSpine extends UIRenderer {
             }
 
             // Check timeline events
-            this._checkEvents(anim, oldTime, entry.trackTime);
+            this._checkEvents(entry, oldTime, entry.trackTime);
+
+            // Check queue advance
+            if (entry.next && entry.trackTime >= entry.next.delay) {
+                const nextEntry = entry.next;
+                entry.next = null;
+                if (nextEntry.mixDuration > 0) {
+                    nextEntry.mixingFrom = entry;
+                    entry.mixingTo = nextEntry;
+                    nextEntry.mixTime = 0;
+                    this._emitEvent(FastSpineEventType.INTERRUPT, entry);
+                } else {
+                    this._emitEvent(FastSpineEventType.END, entry);
+                }
+                this._tracks.set(trackIndex, nextEntry);
+                if (trackIndex === 0) this._currentTrack = nextEntry;
+                this._emitEvent(FastSpineEventType.START, nextEntry);
+            }
         }
 
         this.markForUpdateRenderData();
     }
 
-    private _checkEvents(anim: FastSpineAnimation, oldTime: number, newTime: number): void {
-        if (!this._data || !this._data.events || this._data.events.length === 0) return;
+    private _checkEvents(entry: TrackEntry, oldTime: number, newTime: number): void {
+        const anim = entry.animation;
+        if (!anim || !this._data || !this._data.events || this._data.events.length === 0) return;
         const dur = anim.duration > 0 ? anim.duration : 1 / this._data.fps;
-        const t1 = entryLoopTime(oldTime, dur, this.loop);
-        const t2 = entryLoopTime(newTime, dur, this.loop);
+        const t1 = entryLoopTime(oldTime, dur, entry.loop);
+        const t2 = entryLoopTime(newTime, dur, entry.loop);
 
         for (const ev of this._data.events) {
             if (ev.frame >= anim.startFrame && ev.frame < anim.startFrame + anim.frameCount) {
@@ -456,9 +516,9 @@ export class FastSpine extends UIRenderer {
                     ? (ev.time >= t1 && ev.time <= t2)
                     : (ev.time >= t1 || ev.time <= t2);
                 if (inRange) {
-                    this._emitEvent(FastSpineEventType.EVENT, this._currentTrack!, ev);
-                    if (this._eventListener && this._currentTrack) {
-                        this._eventListener(this._currentTrack, ev);
+                    this._emitEvent(FastSpineEventType.EVENT, entry, ev);
+                    if (this._eventListener) {
+                        this._eventListener(entry, ev);
                     }
                 }
             }
@@ -468,8 +528,23 @@ export class FastSpine extends UIRenderer {
     /**
      * Drop-in sp.Skeleton API: Set animation on track
      */
-    public setAnimation(trackIndex: number, animName: string, loop = true): TrackEntry | null {
+    public setAnimation(trackIndex: number, animName: string, loop = true, crossfade?: number): TrackEntry | null {
         const anim = this._data.findAnimation(animName);
+        if (!anim) return null;
+
+        const curEntry = this._tracks.get(trackIndex);
+        let mixDuration = 0;
+
+        if (curEntry && curEntry.animation) {
+            const prevAnimName = curEntry.animationName;
+            if (typeof crossfade === 'number' && crossfade >= 0) {
+                mixDuration = crossfade;
+                this.setMix(prevAnimName, animName, crossfade);
+            } else {
+                mixDuration = this.getMix(prevAnimName, animName);
+            }
+        }
+
         const entry: TrackEntry = {
             trackIndex,
             animation: anim,
@@ -478,7 +553,26 @@ export class FastSpine extends UIRenderer {
             delay: 0,
             trackTime: 0,
             isComplete: false,
+            mixDuration,
+            mixTime: 0,
+            mixingFrom: (curEntry && mixDuration > 0) ? curEntry : null,
+            mixingTo: null,
+            next: null,
+            alpha: 1,
         };
+
+        if (curEntry) {
+            if (curEntry.mixingFrom) {
+                this._emitEvent(FastSpineEventType.END, curEntry.mixingFrom);
+                curEntry.mixingFrom = null;
+            }
+            if (mixDuration > 0) {
+                curEntry.mixingTo = entry;
+                this._emitEvent(FastSpineEventType.INTERRUPT, curEntry);
+            } else {
+                this._emitEvent(FastSpineEventType.END, curEntry);
+            }
+        }
 
         this._tracks.set(trackIndex, entry);
         if (trackIndex === 0) {
@@ -492,22 +586,90 @@ export class FastSpine extends UIRenderer {
 
     /**
      * Drop-in sp.Skeleton API: Add animation to queue
+     * Supports both (trackIndex, animName, loop, crossfade) and (trackIndex, animName, loop, delay, crossfade)
      */
-    public addAnimation(trackIndex: number, animName: string, loop = true): TrackEntry | null {
-        // Queue or set
-        if (!this._tracks.has(trackIndex)) {
-            return this.setAnimation(trackIndex, animName, loop);
+    public addAnimation(
+        trackIndex: number,
+        animName: string,
+        loop = true,
+        delayOrCrossfade = 0,
+        crossfade?: number
+    ): TrackEntry | null {
+        let delay = 0;
+        let actualCrossfade: number | undefined = undefined;
+
+        if (crossfade !== undefined) {
+            delay = delayOrCrossfade;
+            actualCrossfade = crossfade;
+        } else if (delayOrCrossfade > 0) {
+            actualCrossfade = delayOrCrossfade;
+            delay = 0;
         }
-        // Future queue can be queued; for now set if current complete
-        return this.setAnimation(trackIndex, animName, loop);
+
+        const curEntry = this._tracks.get(trackIndex);
+        if (!curEntry || !curEntry.animation) {
+            return this.setAnimation(trackIndex, animName, loop, actualCrossfade);
+        }
+
+        let lastEntry = curEntry;
+        while (lastEntry.next) {
+            lastEntry = lastEntry.next;
+        }
+
+        const anim = this._data.findAnimation(animName);
+        if (!anim) return null;
+
+        let mixDuration = 0;
+        if (typeof actualCrossfade === 'number' && actualCrossfade >= 0) {
+            mixDuration = actualCrossfade;
+            this.setMix(lastEntry.animationName, animName, actualCrossfade);
+        } else {
+            mixDuration = this.getMix(lastEntry.animationName, animName);
+        }
+
+        let effectiveDelay = delay;
+        if (effectiveDelay <= 0) {
+            const prevDur = lastEntry.animation ? (lastEntry.animation.duration > 0 ? lastEntry.animation.duration : 1 / this._data.fps) : 0;
+            effectiveDelay = Math.max(0, prevDur - mixDuration);
+        }
+
+        const newEntry: TrackEntry = {
+            trackIndex,
+            animation: anim,
+            animationName: animName,
+            loop,
+            delay: effectiveDelay,
+            trackTime: 0,
+            isComplete: false,
+            mixDuration,
+            mixTime: 0,
+            mixingFrom: null,
+            mixingTo: null,
+            next: null,
+            alpha: 1,
+        };
+
+        lastEntry.next = newEntry;
+        return newEntry;
     }
 
     public clearTrack(trackIndex: number): void {
-        this._tracks.delete(trackIndex);
+        const entry = this._tracks.get(trackIndex);
+        if (entry) {
+            if (entry.mixingFrom) {
+                this._emitEvent(FastSpineEventType.END, entry.mixingFrom);
+                entry.mixingFrom = null;
+            }
+            this._emitEvent(FastSpineEventType.END, entry);
+            this._tracks.delete(trackIndex);
+        }
         if (trackIndex === 0) this._currentTrack = null;
     }
 
     public clearTracks(): void {
+        for (const [trackIndex] of this._tracks) {
+            this.clearTrack(trackIndex);
+        }
         this._tracks.clear();
         this._currentTrack = null;
     }
@@ -586,16 +748,79 @@ export class FastSpine extends UIRenderer {
     /**
      * Query playback progress for assembler
      */
-    public getPlaybackProgress(): { frame1: number, frame2: number, alpha: number, isComplete: boolean } {
-        if (!this._currentTrack || !this._currentTrack.animation) {
-            return { frame1: 0, frame2: 0, alpha: 0, isComplete: true };
+    public getPlaybackProgress(): FastSpinePlaybackProgress {
+        const dummy: FastSpinePlaybackProgress = {
+            frame1: 0,
+            frame2: 0,
+            alpha: 0,
+            isComplete: true,
+            isMixing: false,
+            mixAlpha: 1,
+            fromFrame1: 0,
+            fromFrame2: 0,
+            fromAlpha: 0,
+            fromOrderId: 0,
+            toOrderId: 0,
+        };
+
+        if (!this._currentTrack || !this._currentTrack.animation || !this._data || !this._data.isValid) {
+            return dummy;
         }
-        return this._data.getFrameProgress(
-            this._currentTrack.animationName,
-            this._currentTrack.trackTime,
-            this._currentTrack.loop,
-            this._data.currentSkinName
+
+        const skinName = this._data.currentSkinName;
+        const curEntry = this._currentTrack;
+        const toProg = this._data.getFrameProgress(
+            curEntry.animationName,
+            curEntry.trackTime,
+            curEntry.loop,
+            skinName
         );
+
+        const toFrame = (this.interpolateFrames && toProg.alpha >= 0.5) ? toProg.frame2 : toProg.frame1;
+        const toOrderId = this._data.getDrawOrderId(toFrame);
+
+        if (curEntry.mixingFrom && curEntry.mixingFrom.animation && curEntry.mixDuration > 0) {
+            const fromEntry = curEntry.mixingFrom;
+            const fromProg = this._data.getFrameProgress(
+                fromEntry.animationName,
+                fromEntry.trackTime,
+                fromEntry.loop,
+                skinName
+            );
+
+            const fromFrame = (this.interpolateFrames && fromProg.alpha >= 0.5) ? fromProg.frame2 : fromProg.frame1;
+            const fromOrderId = this._data.getDrawOrderId(fromFrame);
+
+            const mixAlpha = Math.min(1, Math.max(0, curEntry.mixTime / curEntry.mixDuration));
+
+            return {
+                frame1: toProg.frame1,
+                frame2: toProg.frame2,
+                alpha: toProg.alpha,
+                isComplete: toProg.isComplete,
+                isMixing: mixAlpha < 1.0,
+                mixAlpha,
+                fromFrame1: fromProg.frame1,
+                fromFrame2: fromProg.frame2,
+                fromAlpha: fromProg.alpha,
+                fromOrderId,
+                toOrderId,
+            };
+        }
+
+        return {
+            frame1: toProg.frame1,
+            frame2: toProg.frame2,
+            alpha: toProg.alpha,
+            isComplete: toProg.isComplete,
+            isMixing: false,
+            mixAlpha: 1,
+            fromFrame1: toProg.frame1,
+            fromFrame2: toProg.frame2,
+            fromAlpha: toProg.alpha,
+            fromOrderId: toOrderId,
+            toOrderId: toOrderId,
+        };
     }
 }
 
